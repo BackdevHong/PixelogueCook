@@ -1,0 +1,21 @@
+name: PixelogueCook
+version: '1.0-SNAPSHOT'
+main: org.server.pixelogueCook.PixelogueCook
+api-version: '1.21'
+commands:
+  farm:
+  food:
+    aliases: [음식]
+    description: 음식/레시피 관리
+    permission: cook.admin
+  cook:
+    aliases: [요리]
+    description: 요리 GUI 열기
+    permission: cook.chef
+permissions:
+  cook.admin:
+    default: op
+  farm.admin:
+    default: op
+  cook.chef:
+    default: false

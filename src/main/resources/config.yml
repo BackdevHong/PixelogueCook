@@ -1,0 +1,85 @@
+# 작물별 성장 시간(초)
+crops:
+  WHEAT: 180
+  CARROTS: 180
+  POTATOES: 180
+  BEETROOTS: 180
+
+# 기본 등급 확률(합 1.0) — 필요에 따라 조정
+base-prob:
+  S: 0.05
+  A: 0.15
+  B: 0.30
+  C: 0.30
+  D: 0.20
+
+# 영양제 가중치(곱하기 계수, 이후 정규화됨)
+fertilizer-multiplier:
+  NONE:
+    S: 1.0
+    A: 1.0
+    B: 1.0
+    C: 1.0
+    D: 1.0
+  MID:   # 중급
+    S: 1.6
+    A: 1.3
+    B: 1.1
+    C: 0.9
+    D: 0.7
+  HIGH:  # 고급
+    S: 2.2
+    A: 1.6
+    B: 1.1
+    C: 0.7
+    D: 0.5
+  TOP:   # 최고급
+    S: 3.0
+    A: 2.0
+    B: 1.0
+    C: 0.5
+    D: 0.3
+
+hologram:
+  refresh-ticks: 20
+  title-format: "&a남은 시간: &f%mm:ss%"
+  grown-format: "&e수확 가능!"
+
+grade-item:
+  name-format: "&f%crop% &7(등급 &6%grade%&7)"
+  lore:
+    - "&7영양제: &b%fertilizer%"
+    - "&7수확자: &f%player%"
+
+fertilizer-time-reduce:
+  MID: 0.9   # 90% (즉, 10% 빨라짐)
+  HIGH: 0.75 # 75% (25% 빨라짐)
+  TOP: 0.5   # 50% (절반 시간)
+
+fertilizer-items:
+  MID: "중급 영양제"
+  HIGH: "고급 영양제"
+  TOP: "최고급 영양제"
+
+crop-display-names:
+  WHEAT: "밀"
+  CARROTS: "당근"
+  POTATOES: "감자"
+  BEETROOTS: "비트"
+
+# 등급별 포화도 추가 보정 (min~max). 소수 가능.
+saturation-bonus:
+  S: [2.0, 2.5]
+  A: [1.0, 1.5]
+  B: [0.0, 0.5]
+  C: [0.0, 0.0]
+  D: [0.0, 0.0]
+
+# (선택) 레시피 파일명
+recipes-file: "recipes.yml"
+
+# 최종 등급 산정 규칙: MIN | AVERAGE (대문자)
+cook-grade-rule: "MIN"
+
+cook:
+  match-mode: EXACT

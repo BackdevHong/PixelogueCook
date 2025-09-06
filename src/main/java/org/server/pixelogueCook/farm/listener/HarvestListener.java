@@ -44,8 +44,8 @@ public class HarvestListener implements Listener {
 
         // 등급 보상 아이템 (기존 로직)
         Grade grade = crops.drawGrade(ci.fertilizer);
-        ItemStack gradeDrop = ItemUtil.makeGradeDrop(plugin, ct.name(), grade, ci.fertilizer, e.getPlayer());
-
+        ItemStack gradeDrop = ItemUtil.makeGradeDrop(plugin, b.getType(), grade, ci.fertilizer, e.getPlayer());
+        
         // 재심기용 아이템(씨앗/작물) 1개
         ItemStack replantItem = new ItemStack(ct.replantItem, 1);
 

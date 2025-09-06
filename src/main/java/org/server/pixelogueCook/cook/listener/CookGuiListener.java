@@ -1,17 +1,25 @@
 package org.server.pixelogueCook.cook.listener;
 
+import net.md_5.bungee.api.ChatMessageType;
+import net.md_5.bungee.api.chat.TextComponent;
 import org.bukkit.Material;
+import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataType;
 import org.server.pixelogueCook.PixelogueCook;
 import org.server.pixelogueCook.cook.inventories.CookInventory;
 import org.server.pixelogueCook.cook.inventories.RecipeDetailInventory;
 import org.server.pixelogueCook.cook.inventories.RecipeListInventory;
 import org.server.pixelogueCook.cook.service.CookService;
+import org.server.pixelogueCook.cook.util.FoodKeys;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -116,6 +124,87 @@ public class CookGuiListener implements Listener {
                     e.getInventory().setItem(s, null);
                 }
             }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onConsume(PlayerItemConsumeEvent e) {
+        ItemStack item = e.getItem();
+        if (item == null || !item.getType().isEdible()) return;
+
+        ItemMeta im = item.getItemMeta();
+        boolean allowed = false;
+        Integer addFood = null;
+        Float addSat = null;
+
+        if (im != null) {
+            var pdc = im.getPersistentDataContainer();
+            Integer flag = pdc.get(FoodKeys.foodAllowed(plugin), PersistentDataType.INTEGER);
+            allowed = (flag != null && flag == 1);
+            addFood = pdc.get(FoodKeys.foodHunger(plugin), PersistentDataType.INTEGER);
+            addSat  = pdc.get(FoodKeys.foodSaturation(plugin), PersistentDataType.FLOAT);
+        }
+
+        Player p = e.getPlayer();
+
+        // 1) 허용 안 된 음식은 차단(경고)
+        if (!allowed) {
+            e.setCancelled(true);
+            p.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent("§c이 음식은 먹을 수 없습니다."));
+            p.playSound(p.getLocation(), Sound.UI_BUTTON_CLICK, 0.6f, 0.6f);
+            return;
+        }
+
+        // 2) 허용 음식이지만 커스텀 회복값이 없으면 바닐라 그대로 적용
+        if ((addFood == null || addFood <= 0) && (addSat == null || addSat <= 0f)) {
+            return;
+        }
+
+        // 3) 커스텀 회복값이 있으면 바닐라를 취소하고 직접 적용
+        e.setCancelled(true);
+
+        // 수량 1개 소모 처리 (주로 메인/보조손 체크)
+        consumeOneFromHands(p, item);
+
+        // 회복 적용 (허기: 최대 20, 포화도: 현재 허기 한도까지)
+        int curFood = p.getFoodLevel();
+        float curSat = p.getSaturation();
+
+        int deltaFood = Math.max(0, addFood == null ? 0 : addFood);
+        float deltaSat = Math.max(0f, addSat == null ? 0f : addSat);
+
+        int newFood = Math.min(20, curFood + deltaFood);
+        float newSat = Math.min(newFood, curSat + deltaSat);
+
+        p.setFoodLevel(newFood);
+        p.setSaturation(newSat);
+
+        // 스튜류 빈 그릇 반환(선택)
+        Material t = item.getType();
+        if (t == Material.MUSHROOM_STEW || t == Material.RABBIT_STEW || t == Material.BEETROOT_SOUP || t == Material.SUSPICIOUS_STEW) {
+            p.getInventory().addItem(new ItemStack(Material.BOWL));
+        }
+
+        // 피드백
+        p.spigot().sendMessage(ChatMessageType.ACTION_BAR, new TextComponent("§a허기 +" + deltaFood + " §7/ §b포화도 +" + (deltaSat % 1f == 0 ? String.valueOf((int)deltaSat) : String.format("%.1f", deltaSat))));
+        p.playSound(p.getLocation(), Sound.ENTITY_GENERIC_EAT, 0.8f, 1.0f);
+    }
+
+    private void consumeOneFromHands(Player p, ItemStack consumed) {
+        // 메인핸드
+        ItemStack main = p.getInventory().getItemInMainHand();
+        if (main != null && main.isSimilar(consumed)) {
+            int amt = main.getAmount() - 1;
+            if (amt <= 0) p.getInventory().setItemInMainHand(null);
+            else { main.setAmount(amt); p.getInventory().setItemInMainHand(main); }
+            return;
+        }
+        // 보조핸드
+        ItemStack off = p.getInventory().getItemInOffHand();
+        if (off != null && off.isSimilar(consumed)) {
+            int amt = off.getAmount() - 1;
+            if (amt <= 0) p.getInventory().setItemInOffHand(null);
+            else { off.setAmount(amt); p.getInventory().setItemInOffHand(off); }
         }
     }
 }

@@ -272,27 +272,51 @@ public class CookService {
         ItemMeta im = dish.getItemMeta();
         if (im == null) im = Bukkit.getItemFactory().getItemMeta(dish.getType());
 
-        String baseName = (r.displayName != null && !r.displayName.isBlank()) ? r.displayName : r.id;
+        String baseName = r.id;
         String display = "§f" + baseName;
         if (grade != null) display += " §7(등급 §6" + grade.name() + "§7)";
         im.setDisplayName(display);
 
-        // 등급 로어(선택)
         if (grade != null) {
             List<String> lore = im.hasLore() ? im.getLore() : new java.util.ArrayList<>();
             lore.add("§7등급: §6" + grade.name());
+            // 보여주기용: 회복 수치도 로어에 표기
+            lore.add("§7허기: §a+" + hungerByGrade(grade) + " §7포화도: §b+" + saturationByGrade(grade));
             im.setLore(lore);
         }
 
         var pdc = im.getPersistentDataContainer();
         pdc.set(FoodKeys.foodAllowed(plugin), PersistentDataType.INTEGER, 1);
         pdc.set(FoodKeys.recipeId(plugin), PersistentDataType.STRING, r.id);
-        if (grade != null) {
-            pdc.set(FoodKeys.dishGrade(plugin), PersistentDataType.STRING, grade.name());
-        }
+
+        // ✅ 커스텀 회복값 저장
+        int hunger = (grade != null) ? hungerByGrade(grade) : 0;
+        float sat   = (grade != null) ? saturationByGrade(grade) : 0f;
+        if (hunger > 0) pdc.set(FoodKeys.foodHunger(plugin), PersistentDataType.INTEGER, hunger);
+        if (sat > 0f)   pdc.set(FoodKeys.foodSaturation(plugin), PersistentDataType.FLOAT, sat);
 
         dish.setItemMeta(im);
         return dish;
+    }
+
+    // 등급별 기본 회복값(예시) — 필요 시 config로 이동해도 됩니다.
+    private int hungerByGrade(Grade g){
+        return switch (g){
+            case S -> 10; // 허기 +10
+            case A -> 8;
+            case B -> 6;
+            case C -> 4;
+            case D -> 2;
+        };
+    }
+    private float saturationByGrade(Grade g){
+        return switch (g){
+            case S -> 4.0f; // 포화도 +4.0
+            case A -> 3.0f;
+            case B -> 2.0f;
+            case C -> 1.0f;
+            case D -> 0.5f;
+        };
     }
 
 

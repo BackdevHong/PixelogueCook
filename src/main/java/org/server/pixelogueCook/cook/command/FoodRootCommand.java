@@ -1,11 +1,12 @@
 package org.server.pixelogueCook.cook.command;
 
 
+import org.server.pixelogueCook.PixelogueCook;
 import org.server.pixelogueCook.cook.command.sub.food.*;
 import org.server.pixelogueCook.cook.service.CookService;
 
 public class FoodRootCommand extends BaseCommand {
-    public FoodRootCommand(String label, CookService cook) {
+    public FoodRootCommand(String label, CookService cook, PixelogueCook plugin) {
         super(label);
         register(new FoodRegisterCmd(cook));
         register(new FoodAddIngHandCmd(cook));
@@ -13,5 +14,7 @@ public class FoodRootCommand extends BaseCommand {
         register(new FoodListCmd(cook));
         register(new FoodRemoveCmd(cook));
         register(new FoodGiveCmd(cook));
+        register(new FoodReloadCmd(plugin, cook));
+        register(new FoodCapCmd(cook));
     }
 }

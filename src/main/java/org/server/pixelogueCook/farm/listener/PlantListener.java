@@ -10,26 +10,20 @@ import org.bukkit.event.entity.EntityChangeBlockEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.server.pixelogueCook.PixelogueCook;
 import org.server.pixelogueCook.farm.service.CropService;
-import org.server.pixelogueCook.farm.service.HologramService;
 
 public class PlantListener implements Listener {
     private final PixelogueCook plugin;
     private final CropService crops;
-    private final HologramService holo;
-
-    public PlantListener(PixelogueCook plugin, CropService crops, HologramService holo) {
-        this.plugin = plugin;
-        this.crops = crops;
-        this.holo = holo;
+    public PlantListener(PixelogueCook plugin, CropService crops) {
+        this.plugin = plugin; this.crops = crops;
     }
-
     @EventHandler
     public void onPlace(BlockPlaceEvent e) {
         Block b = e.getBlockPlaced();
         if (!crops.isSupportedCrop(b.getType())) return;
-        if (b.getRelative(0,-1,0).getType() != Material.FARMLAND) return;
+        if (b.getRelative(0, -1, 0).getType() != Material.FARMLAND) return;
 
-        crops.get(b).ifPresent(holo::removeHologram);
+        crops.get(b).ifPresent(ci -> {}); // no-op
         plugin.getServer().getScheduler().runTask(plugin, () -> crops.create(b));
     }
 

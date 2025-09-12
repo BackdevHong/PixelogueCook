@@ -10,6 +10,7 @@ public final class FoodKeys {
     public static NamespacedKey recipeId(PixelogueCook p){ return new NamespacedKey(p,"recipe-id"); }
     public static NamespacedKey recipeBookId(PixelogueCook p){ return new NamespacedKey(p,"recipe-book-id"); }
 
+    public static NamespacedKey recipeCheckId(PixelogueCook p) { return new NamespacedKey(p,"recipe-check-id"); }
     // ✅ 커스텀 회복값
     public static NamespacedKey foodHunger(PixelogueCook p){ return new NamespacedKey(p,"food-hunger"); }         // int (추가 허기)
     public static NamespacedKey foodSaturation(PixelogueCook p){ return new NamespacedKey(p,"food-saturation"); } // float (추가 포화도)

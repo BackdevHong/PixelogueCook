@@ -17,6 +17,9 @@ public class CookRecipe {
     // ✅ 재료: 각 ItemStack의 amount가 "필요 수량"을 의미
     public final Map<Material, Integer> ingredients = new LinkedHashMap<>();
 
+    public Integer maxFood = null;
+    public Float   maxSat  = null;
+
     public CookRecipe(String id, String displayName, ItemStack resultTemplate, long cookMillis) {
         this.id = id;
         this.displayName = displayName;

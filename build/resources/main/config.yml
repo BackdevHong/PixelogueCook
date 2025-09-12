@@ -1,3 +1,8 @@
+modules:
+  farm: true
+  cook: true
+  fishing: true
+
 # 작물별 성장 시간(초)
 crops:
   WHEAT: 180
@@ -47,9 +52,9 @@ hologram:
 
 grade-item:
   name-format: "&f%crop% &7(등급 &6%grade%&7)"
-  lore:
-    - "&7영양제: &b%fertilizer%"
-    - "&7수확자: &f%player%"
+
+fishing:
+  name-format: "&f%name% &7(등급 %color%%grade%&7)"
 
 fertilizer-time-reduce:
   MID: 0.9   # 90% (즉, 10% 빨라짐)
@@ -82,4 +87,68 @@ recipes-file: "recipes.yml"
 cook-grade-rule: "MIN"
 
 cook:
-  match-mode: EXACT
+  match-mode: CONTAINS
+  require-learn: true
+
+#
+# 낚시
+#
+
+right_or_left:
+  length_min: 10
+  length_max: 12
+  time_seconds: 8
+  max_mistakes: 3
+
+dps:
+  clicks_min: 20
+  clicks_max: 90
+  time_seconds: 4
+
+timing:
+  time_seconds: 6
+  bar_length: 32
+  green_len_min: 3
+  green_len_max: 6
+  yellow_len_min: 6
+  yellow_len_max: 12
+  pointer_tick_interval: 2      # 틱 간격(2틱=0.1초). 작을수록 빨리 움직임
+
+# 랭크 가중치(기본값). 로드 등급에 따라 멀티플라이어 적용
+fish_rank_weights:
+  S: 1.0
+  A: 4.0
+  B: 15.0
+  C: 30.0
+  D: 50.0
+
+# 로드 등급별 가중치 승수
+rod_tier_multipliers:
+  BASIC:
+    S: 1.0
+    A: 1.0
+    B: 1.0
+    C: 1.0
+    D: 1.0
+  INTERMEDIATE:
+    S: 1.5
+    A: 1.3
+    B: 1.1
+    C: 1.0
+    D: 0.95
+  ADVANCED:
+    S: 2.0
+    A: 1.6
+    B: 1.25
+    C: 0.95
+    D: 0.9
+  MASTER:
+    S: 2.5
+    A: 1.8
+    B: 1.3
+    C: 0.9
+    D: 0.8
+
+cook.batch-time-mode: PER_BATCH   # PER_BATCH = 조리시간 × 배치수, FIXED = 한 번에 끝
+cook.max-batch-per-cook: 32      # 한 번에 최대 16개까지
+cook.cap-mode: SCALE

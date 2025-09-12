@@ -22,7 +22,6 @@ public class RecipeBookListener implements Listener {
         String id = im.getPersistentDataContainer().get(FoodKeys.recipeBookId(plugin), PersistentDataType.STRING);
         if (id == null) return;
 
-        e.setCancelled(true); // 책 열림 방지
         boolean added = cook.learn(e.getPlayer().getUniqueId(), id);
         if (added) {
             e.getPlayer().sendMessage("새로운 레시피를 배웠습니다!");
@@ -31,4 +30,9 @@ public class RecipeBookListener implements Listener {
             e.getPlayer().sendMessage("이미 배운 레시피입니다.");
         }
     }
+
+    @org.bukkit.event.EventHandler
+    public void onQuit(org.bukkit.event.player.PlayerQuitEvent e){ cook.onQuit(e.getPlayer()); }
+    @org.bukkit.event.EventHandler
+    public void onJoin(org.bukkit.event.player.PlayerJoinEvent e){ cook.onJoin(e.getPlayer()); }
 }

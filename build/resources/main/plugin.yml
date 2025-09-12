@@ -12,6 +12,14 @@ commands:
     aliases: [요리]
     description: 요리 GUI 열기
     permission: cook.chef
+  fishing:
+    aliases: [낚시]
+    description: Fishing admin command
+    permission: fishing.admin
+  fish:
+    aliases: [물고기]
+    description: Fishing admin command
+    permission: fishing.admin
 permissions:
   cook.admin:
     default: op
@@ -19,3 +27,5 @@ permissions:
     default: op
   cook.chef:
     default: false
+  fishing.admin:
+    default: op

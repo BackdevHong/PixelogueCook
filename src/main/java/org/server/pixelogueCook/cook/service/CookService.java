@@ -1,6 +1,7 @@
 package org.server.pixelogueCook.cook.service;
 
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
@@ -25,6 +26,14 @@ public class CookService {
 
     public CookService(PixelogueCook plugin) { this.plugin = plugin; }
 
+    private enum BatchTimeMode { PER_BATCH, FIXED }
+    private enum CapMode { CLIP, SCALE }
+    private enum OfflineMode { PAUSE, DELIVER_ON_JOIN }
+
+    private final Map<UUID, Integer> taskIds = new ConcurrentHashMap<>();
+
+    private File cookingFile(){ return new File(plugin.getDataFolder(), "cooking.yml"); }
+
     public Map<String, CookRecipe> recipes(){ return recipes; }
     public Set<String> learned(UUID pid){ return learned.computeIfAbsent(pid, k->new LinkedHashSet<>()); }
 
@@ -43,12 +52,13 @@ public class CookService {
                 m.put("cookSec", r.cookMillis/1000L);
                 m.put("result", r.resultTemplate);
 
-                // ✅ Material 이름으로 저장
                 Map<String,Integer> ing = new LinkedHashMap<>();
-                for (var e : r.ingredients.entrySet()) {
-                    ing.put(e.getKey().name(), e.getValue());
-                }
+                for (var e : r.ingredients.entrySet()) ing.put(e.getKey().name(), e.getValue());
                 m.put("ingredients", ing);
+
+                // ✅ [추가] 최대치 저장(있을 때만)
+                if (r.maxFood != null) m.put("maxFood", r.maxFood);
+                if (r.maxSat  != null) m.put("maxSat",  r.maxSat);
 
                 list.add(m);
             }
@@ -65,7 +75,7 @@ public class CookService {
         File f = recipesFile(); if (!f.exists()) return;
         YamlConfiguration y = YamlConfiguration.loadConfiguration(f);
 
-        for (Map<?, ?> m : y.getMapList("recipes")) {   // ← 여기!
+        for (Map<?, ?> m : y.getMapList("recipes")) {
             try {
                 String id   = String.valueOf(m.get("id"));
                 String name = String.valueOf(m.get("name"));
@@ -75,7 +85,6 @@ public class CookService {
 
                 CookRecipe r = new CookRecipe(id, name, tmpl, cookMs);
 
-                // ingredients: Map<String, Integer> 기대
                 Object rawIng = m.get("ingredients");
                 if (rawIng instanceof Map<?, ?> mm) {
                     for (Map.Entry<?, ?> e : mm.entrySet()) {
@@ -84,7 +93,6 @@ public class CookService {
                         if (mat != null && amt > 0) r.ingredients.put(mat, amt);
                     }
                 } else {
-                    // (선택) 구버전 v2: List<ItemStack> → 타입별 합산
                     Object v2 = m.get("ingredientsV2");
                     if (v2 instanceof List<?> list) {
                         Map<Material,Integer> conv = new LinkedHashMap<>();
@@ -96,6 +104,12 @@ public class CookService {
                         r.ingredients.putAll(conv);
                     }
                 }
+
+                // ✅ [추가] 최대치 로드(있을 때만)
+                Object mf = m.get("maxFood");
+                if (mf instanceof Number n) r.maxFood = n.intValue();
+                Object ms = m.get("maxSat");
+                if (ms instanceof Number n) r.maxSat = n.floatValue();
 
                 recipes.put(id, r);
             } catch (Exception ignore) {}
@@ -127,10 +141,31 @@ public class CookService {
     // ===== 등록: 손에 든 음식으로 =====
     public String registerFromHand(Player p, String id, long cookSec){
         ItemStack hand = p.getInventory().getItemInMainHand();
-        if (hand == null || hand.getType().isAir()) return "손에 든 아이템이 없습니다.";
+        if (hand.getType().isAir()) return "손에 든 아이템이 없습니다.";
         if (!hand.getType().isEdible()) return "먹을 수 있는 아이템만 등록할 수 있습니다.";
         if (recipes.containsKey(id)) return "이미 존재하는 레시피 ID 입니다.";
+
         ItemStack tmpl = hand.clone(); tmpl.setAmount(1);
+
+        // ✅ 템플릿의 안내 로어 제거(또는 전부 초기화)
+        ItemMeta im = tmpl.getItemMeta();
+        if (im != null) {
+            if (im.hasLore()) {
+                List<String> filtered = new ArrayList<>();
+                for (String line : im.getLore()) {
+                    String plain = ChatColor.stripColor(line);
+                    if (plain == null) plain = line;
+                    if (plain.contains("조리시간") || plain.contains("클릭하여 재료 확인")) continue;
+                    filtered.add(line);
+                }
+                im.setLore(filtered.isEmpty() ? null : filtered);
+            }
+            // 혹시 전체 초기화를 원하면 위 블록 대신
+            // im.setLore(null);
+
+            tmpl.setItemMeta(im);
+        }
+
         String name = (tmpl.hasItemMeta() && tmpl.getItemMeta().hasDisplayName())
             ? tmpl.getItemMeta().getDisplayName() : tmpl.getType().name();
         CookRecipe r = new CookRecipe(id, name, tmpl, cookSec*1000L);
@@ -206,7 +241,7 @@ public class CookService {
 
         if (totalGrid != totalReq) return false;
         for (var e : reqs.entrySet()) {
-            if (pool.getOrDefault(e.getKey(), 0) != e.getValue()) return false;
+            if (!Objects.equals(pool.getOrDefault(e.getKey(), 0), e.getValue())) return false;
         }
         // pool에 reqs에 없는 타입이 남아있을 가능성은 total 비교에서 이미 배제됨
         return true;
@@ -229,30 +264,14 @@ public class CookService {
             if (ok) candidates.add(r);
         }
         if (candidates.isEmpty()) return null;
-        if (candidates.size()==1) return candidates.get(0);
+        if (candidates.size()==1) return candidates.getFirst();
 
         // 여러 개면 요구 총수량(∑amount) 큰 레시피 우선
         candidates.sort((a,b)-> Integer.compare(
             b.ingredients.values().stream().mapToInt(Integer::intValue).sum(),
             a.ingredients.values().stream().mapToInt(Integer::intValue).sum()
         ));
-        return candidates.get(0);
-    }
-
-    // ===== 자동 시작 =====
-    public String startCookAuto(org.bukkit.entity.Player p, java.util.List<org.bukkit.inventory.ItemStack> grid){
-        long now = System.currentTimeMillis();
-        if (cookingUntil.getOrDefault(p.getUniqueId(), 0L) > now) return "이미 요리 중입니다.";
-        CookRecipe r = findMatch(p.getUniqueId(), grid);
-        if (r == null) return "해당 조합의 레시피를 찾을 수 없습니다.";
-        Grade finalGrade = calcFinalGradeFromIngredients(grid);
-
-        cookingUntil.put(p.getUniqueId(), now + r.cookMillis);
-        p.sendMessage("요리를 시작했습니다: " + r.id + " (" + (r.cookMillis/1000) + "초, 등급 " + finalGrade.name() + ")");
-
-        // ✅ 완료 예약 시 등급 함께 전달
-        Bukkit.getScheduler().runTaskLater(plugin, () -> completeCook(p, r.id, finalGrade), r.cookMillis/50L);
-        return null;
+        return candidates.getFirst();
     }
 
     private void completeCook(Player p, String recipeId, Grade grade){
@@ -272,31 +291,183 @@ public class CookService {
         ItemMeta im = dish.getItemMeta();
         if (im == null) im = Bukkit.getItemFactory().getItemMeta(dish.getType());
 
+        // ✅ (A안) 특정 안내 로어만 제거
+        if (im.hasLore()) {
+            List<String> filtered = new ArrayList<>();
+            for (String line : im.getLore()) {
+                String plain = ChatColor.stripColor(line);
+                if (plain == null) plain = line;
+                if (plain.contains("조리시간") || plain.contains("클릭하여 재료 확인")) continue;
+                filtered.add(line);
+            }
+            im.setLore(filtered.isEmpty() ? null : filtered);
+        }
+
         String baseName = r.id;
         String display = "§f" + baseName;
         if (grade != null) display += " §7(등급 §6" + grade.name() + "§7)";
         im.setDisplayName(display);
 
+        List<String> lore = im.hasLore() ? new ArrayList<>(im.getLore()) : new ArrayList<>();
         if (grade != null) {
-            List<String> lore = im.hasLore() ? im.getLore() : new java.util.ArrayList<>();
             lore.add("§7등급: §6" + grade.name());
-            // 보여주기용: 회복 수치도 로어에 표기
-            lore.add("§7허기: §a+" + hungerByGrade(grade) + " §7포화도: §b+" + saturationByGrade(grade));
-            im.setLore(lore);
         }
+        im.setLore(lore);
 
+        // ✅ 최종 회복량 계산 (요리별 최대치 반영)
+        int   hunger = (grade != null) ? computeHungerFor(r, grade) : 0;
+        float sat    = (grade != null) ? computeSaturationFor(r, grade) : 0f;
+
+
+        // ✅ PDC 저장(섭취 리스너에서 이 값을 사용)
         var pdc = im.getPersistentDataContainer();
         pdc.set(FoodKeys.foodAllowed(plugin), PersistentDataType.INTEGER, 1);
         pdc.set(FoodKeys.recipeId(plugin), PersistentDataType.STRING, r.id);
-
-        // ✅ 커스텀 회복값 저장
-        int hunger = (grade != null) ? hungerByGrade(grade) : 0;
-        float sat   = (grade != null) ? saturationByGrade(grade) : 0f;
         if (hunger > 0) pdc.set(FoodKeys.foodHunger(plugin), PersistentDataType.INTEGER, hunger);
         if (sat > 0f)   pdc.set(FoodKeys.foodSaturation(plugin), PersistentDataType.FLOAT, sat);
 
+        // (선택) 보기용 로어에 표기
+        if (grade != null) {
+            pdc.set(FoodKeys.dishGrade(plugin), PersistentDataType.STRING, grade.name());
+            lore = im.getLore(); if (lore == null) lore = new ArrayList<>();
+            lore.add("§7허기: §a+" + hunger + " §7포화도: §b+" + (sat % 1f == 0 ? (int)sat : String.format(java.util.Locale.ROOT,"%.1f", sat)));
+            // (선택) 최대치도 노출하고 싶으면:
+            if (r.maxFood != null) lore.add("§8최대 포만감: " + r.maxFood + "p" + " (" + (r.maxFood/2) + "칸)");
+            if (r.maxSat  != null) lore.add("§8최대 포화도: " + (r.maxSat % 1f == 0 ? String.valueOf(r.maxSat.intValue()) : String.format(java.util.Locale.ROOT,"%.1f", r.maxSat)));
+            im.setLore(lore);
+        }
+
         dish.setItemMeta(im);
         return dish;
+    }
+
+    private BatchTimeMode batchTimeMode() {
+        try {
+            return BatchTimeMode.valueOf(plugin.getConfig()
+                .getString("cook.batch-time-mode", "PER_BATCH").toUpperCase());
+        } catch (Exception e) { return BatchTimeMode.PER_BATCH; }
+    }
+
+    private int maxBatchPerCook() {
+        try {
+            return Math.max(1, plugin.getConfig().getInt("cook.max-batch-per-cook", 16));
+        } catch (Exception e) { return 16; }
+    }
+
+    // grid(3x3)로 만들 수 있는 최대 배치 수 계산: floor(min(pool[mat]/req[mat]))
+    private int maxBatchFromGrid(List<ItemStack> grid, Map<Material,Integer> reqs) {
+        if (grid == null || grid.isEmpty() || reqs == null || reqs.isEmpty()) return 0;
+
+        Map<Material,Integer> pool = new HashMap<>();
+        for (ItemStack it : grid) {
+            if (it == null || it.getType().isAir()) continue;
+            pool.merge(it.getType(), it.getAmount(), Integer::sum);
+        }
+
+        int batches = Integer.MAX_VALUE;
+        for (var e : reqs.entrySet()) {
+            int have = pool.getOrDefault(e.getKey(), 0);
+            int need = Math.max(1, e.getValue());
+            if (have < need) return 0; // 하나도 못 만듦
+            batches = Math.min(batches, have / need);
+        }
+        if (batches == Integer.MAX_VALUE) return 0;
+        return Math.max(0, Math.min(batches, maxBatchPerCook()));
+    }
+
+    // 조리 계획 객체
+        public record Plan(CookRecipe recipe, Grade finalGrade, int batches, long cookMillisTotal) {
+    }
+
+    /**
+     * 자동 매칭 + 배치 수 계산까지 해서 계획을 돌려줍니다.
+     * 실패 시 String(에러메시지) 반환.
+     */
+    public Object planAuto(Player p, List<ItemStack> grid) {
+        long now = System.currentTimeMillis();
+        if (cookingUntil.getOrDefault(p.getUniqueId(), 0L) > now) return "이미 요리 중입니다.";
+
+        CookRecipe r = findMatch(p.getUniqueId(), grid);
+        if (r == null) return "해당 조합의 레시피를 찾을 수 없습니다.";
+
+        int batches = maxBatchFromGrid(grid, r.ingredients);
+        if (batches <= 0) return "재료가 부족합니다.";
+
+        Grade finalGrade = calcFinalGradeFromIngredients(grid);
+
+        long total;
+        if (batchTimeMode() == BatchTimeMode.PER_BATCH) {
+            total = r.cookMillis * (long) batches;
+        } else {
+            total = r.cookMillis;
+        }
+        return new Plan(r, finalGrade, batches, total);
+    }
+
+    // 계획을 실제 시작으로 전환(타이머 설정 및 지급)
+    public void startPlanned(Player p, Plan plan) {
+        long now = System.currentTimeMillis();
+        long end = now + plan.cookMillisTotal;
+        cookingUntil.put(p.getUniqueId(), end);
+
+        // pending 등록
+        PersistCook pc = new PersistCook();
+        pc.playerId = p.getUniqueId();
+        pc.recipeId = plan.recipe().id;
+        pc.grade = plan.finalGrade() == null ? null : plan.finalGrade().name();
+        pc.batches = Math.max(1, plan.batches());
+        pc.remainMs = plan.cookMillisTotal();
+        pending.put(p.getUniqueId(), pc);
+        saveActiveCooks();
+
+        p.sendMessage("요리를 시작했습니다: " + plan.recipe().id + " x" + plan.batches()
+            + " (" + (plan.cookMillisTotal()/1000) + "초, 등급 " + plan.finalGrade().name() + ")");
+
+        scheduleFinish(p.getUniqueId(), plan.cookMillisTotal());
+    }
+
+    private CapMode capMode() {
+        try {
+            return CapMode.valueOf(plugin.getConfig()
+                .getString("cook.cap-mode", "SCALE").toUpperCase());
+        } catch (Exception e) {
+            return CapMode.SCALE;
+        }
+    }
+
+    // 등급별 기본 테이블은 기존 hungerByGrade/saturationByGrade 사용
+    private int computeHungerFor(CookRecipe r, Grade g){
+        int base = hungerByGrade(g);
+        Integer cap = r.maxFood;
+        if (cap == null || cap <= 0) return base;
+
+        if (capMode() == CapMode.CLIP) {
+            return Math.min(base, cap);
+        } else {
+            int baseMax = hungerByGrade(Grade.S);
+            if (baseMax <= 0) return Math.min(base, cap);
+            double f = cap / (double) baseMax;
+            int scaled = (int) Math.round(base * f);
+            if (base > 0 && scaled <= 0) scaled = 1; // 최소 1포인트 보장
+            return Math.min(scaled, cap);
+        }
+    }
+
+    private float computeSaturationFor(CookRecipe r, Grade g){
+        float base = saturationByGrade(g);
+        Float cap = r.maxSat;
+        if (cap == null || cap <= 0f) return base;
+
+        if (capMode() == CapMode.CLIP) {
+            return Math.min(base, cap);
+        } else {
+            float baseMax = saturationByGrade(Grade.S);
+            if (baseMax <= 0f) return Math.min(base, cap);
+            float f = cap / baseMax;
+            float scaled = Math.round(base * f * 10f) / 10f; // 소수1자리 반올림
+            if (base > 0f && scaled <= 0f) scaled = 0.5f;    // 최소 0.5 보장(원하면 조절)
+            return Math.min(scaled, cap);
+        }
     }
 
     // 등급별 기본 회복값(예시) — 필요 시 config로 이동해도 됩니다.
@@ -383,6 +554,153 @@ public class CookService {
             for (Grade g : pool) sum += scoreOf(g);
             double avg = (double) sum / pool.size();
             return gradeOf((int)Math.round(avg));
+        }
+    }
+
+    private OfflineMode offlineMode() {
+        try {
+            return OfflineMode.valueOf(plugin.getConfig()
+                .getString("cook.offline-mode","PAUSE").toUpperCase());
+        } catch (Exception e) { return OfflineMode.PAUSE; }
+    }
+
+    public static final class PersistCook {
+        public UUID playerId;
+        public String recipeId;
+        public String grade;   // "S","A",... (없으면 null)
+        public int batches = 1;
+        public long remainMs;
+    }
+    private final Map<UUID, PersistCook> pending = new ConcurrentHashMap<>();
+
+
+    private void scheduleFinish(UUID pid, long delayMs) {
+        cancelTask(pid);
+        int id = Bukkit.getScheduler().runTaskLater(plugin, () -> finishCooking(pid), delayMs / 50L).getTaskId();
+        taskIds.put(pid, id);
+    }
+    private void cancelTask(UUID pid){
+        Integer id = taskIds.remove(pid);
+        if (id != null) Bukkit.getScheduler().cancelTask(id);
+    }
+
+    private void giveResult(Player p, PersistCook pc) {
+        Grade g = null;
+        try { if (pc.grade != null) g = Grade.valueOf(pc.grade); } catch (Exception ignored) {}
+        for (int i=0;i<Math.max(1, pc.batches); i++) {
+            ItemStack dish = buildDish(pc.recipeId, g);
+            if (dish != null) p.getInventory().addItem(dish);
+        }
+        p.sendMessage("완성되었습니다: " + pc.recipeId + " x" + Math.max(1, pc.batches)
+            + (pc.grade!=null? " (등급 " + pc.grade + ")" : ""));
+    }
+
+    private void cleanup(UUID pid){
+        cancelTask(pid);
+        cookingUntil.remove(pid);
+        pending.remove(pid);
+        saveActiveCooks();
+    }
+
+    // 완료 시 호출: 온라인/오프라인 정책 반영
+    private void finishCooking(UUID pid) {
+        PersistCook pc = pending.get(pid);
+        if (pc == null) return;
+
+        Player p = Bukkit.getPlayer(pid);
+        boolean online = (p != null && p.isOnline());
+
+        if (!online) {
+            if (offlineMode() == OfflineMode.PAUSE) {
+                // 일시정지: remainMs는 0, 재접속 시 즉시 지급 대신 "재개"로 처리하고 싶다면 시간을 유지해도 됨
+                pc.remainMs = Math.max(0, pc.remainMs); // 그대로 두기
+                saveActiveCooks();
+                return;
+            } else { // DELIVER_ON_JOIN
+                pc.remainMs = 0; // 대기지급 표시
+                saveActiveCooks();
+                return;
+            }
+        }
+
+        // 온라인이면 즉시 지급
+        giveResult(p, pc);
+        cleanup(pid);
+    }
+
+    public void onQuit(Player p){
+        UUID pid = p.getUniqueId();
+        PersistCook pc = pending.get(pid);
+        if (pc == null) return;
+
+        if (offlineMode() == OfflineMode.PAUSE) {
+            long now = System.currentTimeMillis();
+            long until = cookingUntil.getOrDefault(pid, now);
+            long remain = Math.max(0L, until - now);
+            pc.remainMs = remain;
+            cancelTask(pid);
+            saveActiveCooks();
+        } else {
+            // DELIVER_ON_JOIN: 완료될 때 finishCooking이 대기지급으로 표기
+            cancelTask(pid);
+            saveActiveCooks();
+        }
+    }
+
+    public void onJoin(Player p){
+        UUID pid = p.getUniqueId();
+        PersistCook pc = pending.get(pid);
+        if (pc == null) return;
+
+        if (offlineMode() == OfflineMode.PAUSE) {
+            if (pc.remainMs <= 0) {
+                giveResult(p, pc);
+                cleanup(pid);
+            } else {
+                cookingUntil.put(pid, System.currentTimeMillis() + pc.remainMs);
+                scheduleFinish(pid, pc.remainMs);
+                p.sendMessage("§7일시정지된 요리를 재개합니다... (남은 " + (pc.remainMs/1000) + "초)");
+            }
+        } else { // DELIVER_ON_JOIN
+            if (pc.remainMs <= 0) {
+                giveResult(p, pc);
+                cleanup(pid);
+            } else {
+                scheduleFinish(pid, pc.remainMs);
+            }
+        }
+    }
+
+    public void saveActiveCooks(){
+        try {
+            YamlConfiguration y = new YamlConfiguration();
+            for (var e : pending.entrySet()){
+                String k = e.getKey().toString();
+                PersistCook pc = e.getValue();
+                y.set(k + ".recipeId", pc.recipeId);
+                y.set(k + ".grade", pc.grade);
+                y.set(k + ".batches", pc.batches);
+                y.set(k + ".remainMs", Math.max(0, pc.remainMs));
+            }
+            y.save(cookingFile());
+        } catch (Exception ex){ plugin.getLogger().warning("Save cooking failed: "+ex.getMessage()); }
+    }
+
+    public void loadActiveCooks(){
+        pending.clear();
+        File f = cookingFile(); if (!f.exists()) return;
+        YamlConfiguration y = YamlConfiguration.loadConfiguration(f);
+        for (String key : y.getKeys(false)){
+            try {
+                UUID pid = UUID.fromString(key);
+                PersistCook pc = new PersistCook();
+                pc.playerId = pid;
+                pc.recipeId = y.getString(key+".recipeId");
+                pc.grade = y.getString(key+".grade", null);
+                pc.batches = Math.max(1, y.getInt(key+".batches", 1));
+                pc.remainMs = Math.max(0, y.getLong(key+".remainMs", 0));
+                if (pc.recipeId != null) pending.put(pid, pc);
+            } catch (Exception ignore){}
         }
     }
 }
